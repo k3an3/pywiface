@@ -1,0 +1,2 @@
+termcolor
+scapy-python3==0.18
