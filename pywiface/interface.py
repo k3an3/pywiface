@@ -7,6 +7,7 @@ from scapy.layers.dot11 import Dot11, Dot11Elt, sendp, Dot11Deauth, RadioTap
 from termcolor import cprint
 
 from pywiface.models import Station, AP
+from pywiface.threads import ScannerThread
 
 
 class WirelessInterface:
@@ -23,6 +24,7 @@ class WirelessInterface:
         self.sta_sema = threading.Semaphore(0)
         self.essid = essid
         self.bssid = None
+        self.scan_thread = None
         self._channel = channel
         self.hop = True
         if channel:
@@ -88,7 +90,8 @@ class MonitorInterface(WirelessInterface):
         self.channel_lock.acquire()
         if channel:
             self.set_channel(channel)
-        pkt = RadioTap() / Dot11(type=0, subtype=12, addr1=target_mac, addr2=source_mac, addr3=self.bssid) / Dot11Deauth(reason=reason)
+        pkt = RadioTap() / Dot11(type=0, subtype=12, addr1=target_mac, addr2=source_mac,
+                                 addr3=self.bssid) / Dot11Deauth(reason=reason)
         for i in range(count):
             cprint("DEAUTH!!!", 'red')
             for j in range(burst_count):
@@ -97,18 +100,33 @@ class MonitorInterface(WirelessInterface):
                 sleep(.1)
         self.channel_lock.release()
 
-    def get_new_client(self) -> Station:
+    def get_new_station(self) -> Station:
         self.sta_sema.acquire()
         target = next((client for client in self.stations if client.new), None)
+        target.new = False
+        return target
+
+    def get_new_ap(self) -> AP:
+        self.ap_sema.acquire()
+        target = next((ap for ap in self.aps if ap.new), None)
         target.new = False
         return target
 
     def inject(self, pkt, inter=0):
         sendp(pkt, iface=self.name, inter=inter, verbose=False)
 
-    def scan(self, pkt):
+    def scan(self):
+        self.scan_thread = ScannerThread(self)
+        self.scan_thread.start()
+
+    def stop_scan(self):
+        self.scan_thread.stop()
+        self.scan_thread.join()
+
+    def scan_callback(self, pkt):
         client_mgmt_subtypes = (0, 2, 4)
         try:
+            # Management/Beacon
             if pkt.haslayer(Dot11) and pkt.type == 0 and pkt.subtype == 8:
                 if pkt.addr3 not in [target.bssid for target in self.aps]:
                     self.lock.acquire()
@@ -147,7 +165,7 @@ class MonitorInterface(WirelessInterface):
                     self.aps.append(AP(bssid, essid, crypto, channel, w))
                     self.lock.release()
             elif (pkt.haslayer(Dot11)
-                  and (pkt.type == 0 and pkt.addr3 == self.bssid
+                  and (pkt.type == 0 and (not self.bssid or pkt.addr3 == self.bssid)
                        and pkt.subtype in client_mgmt_subtypes
                        or (pkt.type == 2 and pkt.addr1 == self.bssid))):
                 if pkt.addr2 not in [client.mac_addr for client in self.stations]:
@@ -162,9 +180,3 @@ class MonitorInterface(WirelessInterface):
         except Exception as e:
             print(pkt)
             raise e
-
-    def get_new_target(self) -> AP:
-        self.ap_sema.acquire()
-        target = next((ap for ap in self.aps if ap.new), None)
-        target.new = False
-        return target

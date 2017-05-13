@@ -35,7 +35,7 @@ class ScannerThread(StoppableThread):
             hopper = ChannelHoppingThread(self.interface)
             hopper.start()
         try:
-            sniff(iface=self.interface.name, prn=self.interface.scan,
+            sniff(iface=self.interface.name, prn=self.interface.scan_callback,
                   stop_filter=self._stopped)
             if self.interface.hop:
                 hopper.stop()
