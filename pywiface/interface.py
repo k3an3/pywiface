@@ -102,13 +102,13 @@ class MonitorInterface(WirelessInterface):
 
     def get_new_station(self) -> Station:
         self.sta_sema.acquire()
-        target = next((client for client in self.stations if client.new), None)
+        target = next((client for client in self.stations if self.stations[client].new), None)
         target.new = False
         return target
 
     def get_new_ap(self) -> AP:
         self.ap_sema.acquire()
-        target = next((ap for ap in self.aps if ap.new), None)
+        target = next((ap for ap in self.aps if self.aps[ap].new), None)
         target.new = False
         return target
 
