@@ -125,7 +125,7 @@ class MonitorInterface(WirelessInterface):
 
     def ap_passes_test(self, pkt):
         return (pkt.haslayer(Dot11) and pkt.type == 0 and pkt.subtype == 8
-                and pkt.addr3 not in [target.bssid for target in self.aps])
+                and not self.aps.get(pkt.addr3))
 
     def sta_passes_test(self, pkt):
         # Just for readability/sanity
