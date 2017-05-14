@@ -16,8 +16,8 @@ class WirelessInterface:
         self.monitor_mode = monitor_mode
         if monitor_mode:
             self.set_monitor_mode()
-        self.stations = []
-        self.aps = []
+        self.stations = {}
+        self.aps = {}
         self.lock = threading.Lock()
         self.channel_lock = threading.Lock()
         self.ap_sema = threading.Semaphore(0)
@@ -123,60 +123,76 @@ class MonitorInterface(WirelessInterface):
         self.scan_thread.stop()
         self.scan_thread.join()
 
-    def scan_callback(self, pkt):
+    def ap_passes_test(self, pkt):
+        return (pkt.haslayer(Dot11) and pkt.type == 0 and pkt.subtype == 8
+                and pkt.addr3 not in [target.bssid for target in self.aps])
+
+    def sta_passes_test(self, pkt):
+        # Just for readability/sanity
         client_mgmt_subtypes = (0, 2, 4)
+        check = False
+        if pkt.haslayer(Dot11):
+            if (pkt.type == 0 and (not self.bssid or pkt.addr3 == self.bssid)
+                    and pkt.subtype in client_mgmt_subtypes):
+                check = True
+            elif pkt.type == 2 and (pkt.addr1 == self.bssid or not self.bssid):
+                check = True
+        if check:
+            return not (self.stations.get(pkt.addr2) or self.stations.get(pkt.addr1))
+
+    @staticmethod
+    def sta_mac(pkt):
+        return pkt.addr1 if not pkt.addr1 == pkt.addr3 else pkt.addr2
+
+    def scan_callback(self, pkt):
         try:
             # Management/Beacon
-            if pkt.haslayer(Dot11) and pkt.type == 0 and pkt.subtype == 8:
-                if pkt.addr3 not in [target.bssid for target in self.aps]:
-                    self.lock.acquire()
-                    self.ap_sema.release()
-                    # http://stackoverflow.com/a/21664038
-                    essid, channel, w = None, None, None
-                    bssid = pkt.addr3
-                    crypto = ""
-                    cap = pkt.sprintf("{Dot11Beacon:%Dot11Beacon.cap%}"
-                                      "{Dot11ProbeResp:%Dot11ProbeResp.cap%}").split('+')
-                    p = pkt[Dot11Elt]
-                    while isinstance(p, Dot11Elt):
-                        if p.ID == 0:
-                            try:
-                                essid = p.info.decode()
-                            except UnicodeDecodeError as e:
-                                print(p.info)
-                                essid = p.info
-                        elif p.ID == 3:
-                            try:
-                                channel = ord(p.info)
-                            except TypeError as e:
-                                print(p.info)
-                                channel = p.info
-                        elif p.ID == 48:
-                            crypto = "WPA2"
-                            w = p.info[18:19]
-                        elif p.ID == 221 and p.info.startswith(b'\x00P\xf2\x01\x01\x00'):
-                            crypto = "WPA"
-                        p = p.payload
-                    if not crypto:
-                        if 'privacy' in cap:
-                            crypto = "WEP"
-                        else:
-                            crypto = "OPN"
-                    self.aps.append(AP(bssid, essid, crypto, channel, w))
-                    self.lock.release()
-            elif (pkt.haslayer(Dot11)
-                  and (pkt.type == 0 and (not self.bssid or pkt.addr3 == self.bssid)
-                       and pkt.subtype in client_mgmt_subtypes
-                       or (pkt.type == 2 and pkt.addr1 == self.bssid))):
-                if pkt.addr2 not in [client.mac_addr for client in self.stations]:
-                    self.lock.acquire()
-                    try:
-                        channel = pkt[Dot11Elt:3].info
-                    except IndexError:
-                        channel = self.channel
-                    self.stations.append(Station(pkt.addr2, channel, pkt.addr3))
-                    self.sta_sema.release()
-                    self.lock.release()
+            if self.ap_passes_test(pkt):
+                self.lock.acquire()
+                self.ap_sema.release()
+                # http://stackoverflow.com/a/21664038
+                essid, channel, w = None, None, None
+                bssid = pkt.addr3
+                crypto = ""
+                cap = pkt.sprintf("{Dot11Beacon:%Dot11Beacon.cap%}"
+                                  "{Dot11ProbeResp:%Dot11ProbeResp.cap%}").split('+')
+                p = pkt[Dot11Elt]
+                while isinstance(p, Dot11Elt):
+                    if p.ID == 0:
+                        try:
+                            essid = p.info.decode()
+                        except UnicodeDecodeError as e:
+                            print(p.info)
+                            essid = p.info
+                    elif p.ID == 3:
+                        try:
+                            channel = ord(p.info)
+                        except TypeError as e:
+                            print(p.info)
+                            channel = p.info
+                    elif p.ID == 48:
+                        crypto = "WPA2"
+                        w = p.info[18:19]
+                    elif p.ID == 221 and p.info.startswith(b'\x00P\xf2\x01\x01\x00'):
+                        crypto = "WPA"
+                    p = p.payload
+                if not crypto:
+                    if 'privacy' in cap:
+                        crypto = "WEP"
+                    else:
+                        crypto = "OPN"
+                self.aps[bssid] = AP(bssid, essid, crypto, channel, w)
+                self.lock.release()
+            elif self.sta_passes_test(pkt):
+                self.lock.acquire()
+                try:
+                    channel = pkt[Dot11Elt:3].info
+                except IndexError:
+                    channel = self.channel
+                mac = self.sta_mac(pkt)
+                self.stations[mac] = Station(mac, channel, pkt.addr3)
+                self.sta_sema.release()
+                self.lock.release()
         except Exception as e:
             print(pkt)
             raise e
