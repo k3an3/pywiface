@@ -1,10 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 import os
 import sys
+from argparse import ArgumentParser
 
 from termcolor import cprint
-
-from pywiface.interface import WirelessInterface, MonitorInterface
 
 
 def main():
@@ -12,30 +11,33 @@ def main():
         cprint('Error: Must be run as root!', 'red')
         raise SystemExit
 
-    if len(sys.argv) == 1:
-        print("Usage: pywiface command interface [options]")
-        print("Valid commands: mon chan")
-        raise SystemExit
+    from pywiface.interface import WirelessInterface, MonitorInterface
 
-    if sys.argv[1] == 'mon':
-        if len(sys.argv) == 2:
-            print("Usage: pywiface mon interface start|stop")
-            raise SystemExit
-        if sys.argv[3] in ['start', 'true', 'on']:
-            interface = MonitorInterface(name=sys.argv[2])
+    parser = ArgumentParser(description="Manage wireless interfaces")
+    parser.add_argument('command', choices=('mon', 'chan',),help='Valid commands: mon chan')
+    parser.add_argument('interface', help='The interface to operate on')
+    parser.add_argument('option', help='Command specific options')
+
+    args = parser.parse_args()
+
+    if args.command == 'mon':
+        if args.option in ['start', 'on']:
+            interface = MonitorInterface(name=args.interface)
             print("Enabled monitor mode on", interface.name)
-        else:
-            interface = WirelessInterface(name=sys.argv[2])
+        elif args.option in ['stop', 'off']:
+            interface = WirelessInterface(name=args.interface)
             interface.set_managed_mode()
             print("Disabled monitor mode on", interface.name)
-    elif sys.argv[1] == 'chan':
-        if len(sys.argv == 2):
-            print("Usage: pywiface chan interface channel")
-            raise SystemExit
-        if 0 < sys.argv[3] <= 14:
-            interface = WirelessInterface(name=sys.argv[2])
-            interface.channel == sys.argv[3]
-            print("Channel set to", sys.argv[3], "on", interface.name)
+        else:
+            print("Valid options: {start|on,stop|off}")
+    elif args.command == 'chan':
+        if 0 < int(args.option) <= 14:
+            interface = WirelessInterface(name=args.interface)
+            interface.channel == int(args.option)
+            print("Channel set to", args.option, "on", interface.name)
+        else:
+            print("Invalid channel")
+
 
 if __name__ == "__main__":
     main()

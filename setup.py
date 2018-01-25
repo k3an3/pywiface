@@ -11,7 +11,7 @@ setup(
     description='Python wrapper for managing wireless interfaces',
     scripts=['scripts/pywiface'],
     install_requires=[
-        'scapy-python3==0.18',
+        'scapy-python3',
         'termcolor'
     ]
 )
