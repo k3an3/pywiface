@@ -2,7 +2,7 @@
 Python wrapper for controlling wireless interfaces. Especially useful for wireless attack related things.
 
 ```
-sudo pip3 install pywiface
-sudo pywiface mon wlan0 start
-sudo pywiface chan wlan0 11
+pip3 install pywiface
+pywiface mon start wlan0
+pywiface chan 11 wlan0
 ```
